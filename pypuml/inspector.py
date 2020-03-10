@@ -1,61 +1,44 @@
-from astroid import manager, modutils
+from astroid import manager, modutils, node_classes
 import astroid.nodes as ast_node
+import pypuml.entity as ent
 from typing import List, Mapping
 import os
 import filecmp
 
-
-def is_target_module(mod: ast_node.Module):
-    return mod.name != "builtins"
+from pypuml.writer import UmlWriter
 
 
-class AstVisitor(object):
-    def visit(self, ast):
-        if isinstance(ast, ast_node.Module):
-            self.visit_module(ast)
-        elif isinstance(ast, ast_node.ClassDef):
-            self.visit_classdef(ast)
-
-    def visit_module(self, ast: ast_node.Module):
-        if not is_target_module(ast):
-            return
-
-        print(f"namespace {ast.name} {{")
+class AstAnalyzer(object):
+    def visit_module(self, ast: ast_node.Module) -> ent.Module:
+        module = ent.Module(ast.name)
         for child in ast.get_children():
-            self.visit(child)
-        print("}")
+            if isinstance(child, ast_node.ClassDef):
+                module.definitions.append(self.visit_class_def(child))
+        return module
 
-    def visit_classdef(self, ast: ast_node.ClassDef):
-        cls_name = ast.root().name + "." + ast.name
-
-        cls_methods = set()
-        cls_attrs = set()
-        cls_ancestors = ast.ancestors(recurs=False)
+    def visit_class_def(self, ast: ast_node.ClassDef) -> ent.ClassDef:
+        cls = ent.ClassDef(ast.name, ast.root().name)
 
         for method in ast.mymethods():
-            cls_methods.add(method.name)
+            cls.methods.append(ent.Method(method.name, method.type_annotation))
 
         for instance_attrs in ast.instance_attrs.values():
             for instance_attr in instance_attrs:
-                if isinstance(instance_attr, ast_node.AssignAttr):
-                    cls_attrs.add(instance_attr.attrname)
-                elif isinstance(instance_attr.parent, ast_node.AnnAssign):
-                    # cf. astroid/brain/brain_dataclasses.py
-                    cls_attrs.add(instance_attr.parent.target.name)
+                cls.attributes.append(self.visit_instance_attr(instance_attr))
 
-        print(f"  class {cls_name} {{")
+        for anc in ast.ancestors(recurs=False):
+            cls.ancestors.append(self.visit_class_def(anc))
 
-        for method in cls_methods:
-            print(f"    {method}()")
+        return cls
 
-        for attr in cls_attrs:
-            print(f"    {attr}")
-
-        print("  }")
-
-        for anc in cls_ancestors:
-            if is_target_module(anc.root()):
-                print(f"  {cls_name} <|-- {anc.root().name}.{anc.name}")
+    def visit_instance_attr(self, instance_attr: node_classes.NodeNG) -> ent.Attribute:
+        if isinstance(instance_attr, ast_node.AssignAttr):
+            return ent.Attribute(instance_attr.attrname, None)
+        elif isinstance(instance_attr.parent, ast_node.AnnAssign):
+            # cf. astroid/brain/brain_dataclasses.py
+            return ent.Attribute(
+                instance_attr.parent.target.name, instance_attr.parent.annotation
+            )
 
 
 class Project(object):
@@ -86,12 +69,5 @@ class Project(object):
     def generate(self):
         print("@startuml")
         for name, mod in self._modules.items():
-            AstVisitor().visit_module(mod)
+            UmlWriter().write_module(AstAnalyzer().visit_module(mod))
         print("@enduml")
-
-    @classmethod
-    def load_from_files(cls, files: List[str]):
-        project = cls()
-        for file in files:
-            project.load_from_file(file)
-        return project

@@ -1,8 +1,9 @@
 __version__ = "0.1.0"
 
 import sys
-from inspector import Project
+from pypuml.inspector import Project
 
 if __name__ == "__main__":
-    s = Project.load_from_files([sys.argv[1]])
-    s.generate()
+    project = Project()
+    project.load_from_file(sys.argv[1])
+    project.generate()
