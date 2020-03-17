@@ -26,6 +26,8 @@ class ModuleVisitor(object):
 
     def walk_child_modules(self):
         for child_path in modutils.get_module_files(self.file, self.blacklist):
+            if child_path.endswith("__init__.py"):
+                continue
             orig_file = self.file
             self.file = child_path
             yield self.load_module()
@@ -64,7 +66,10 @@ class ModuleVisitor(object):
         self.indent += 1
 
         for instance_attrs in ast.instance_attrs.values():
-            self.write(self._handle_instance_attr(instance_attrs[0]))
+            for attr in instance_attrs:
+                if isinstance(attr, ast_node.AssignAttr):
+                    attr.accept(self)
+                    break
 
         for local in ast.values():
             local.accept(self)
@@ -80,24 +85,32 @@ class ModuleVisitor(object):
                     self.write("%s <|- %s.%s" % (ast.name, cls.root().name, cls.name))
 
     def visit_functiondef(self, ast: ast_node.FunctionDef):
-        self.write("%s()" % ast.name)
+        args = ast.argnames()
+        ret_type = " -> %s" % ast.returns.as_string() if ast.returns else ""
+        self.write("%s(%s)%s" % (ast.name, ','.join(args), ret_type))
+
+    def visit_asyncfunctiondef(self, ast: ast_node.AsyncFunctionDef):
+        self.visit_functiondef(ast)
 
     def visit_assignname(self, ast: ast_node.AssignName):
-        self.write("{static} %s" % ast.name)
+        ast.assign_type().accept(self)
+
+    def visit_assign(self, ast: ast_node.Assign):
+        for target in ast.targets:
+            self.write("{static} %s" % target.name)
 
     def visit_annassign(self, ast: ast_node.AnnAssign):
-        self.write("{static} %s : %s" % (ast.name, ast.annotation.as_string()))
+        self.write("{static} %s : %s" % (ast.target.name, ast.annotation.as_string()))
 
-    def _handle_instance_attr(self, instance_attr: node_classes.NodeNG) -> str:
-        if isinstance(instance_attr, ast_node.AssignAttr):
-            return instance_attr.attrname
-        elif isinstance(instance_attr.parent, ast_node.AnnAssign):
-            # cf. astroid/brain/brain_dataclasses.py
-            return instance_attr.parent.target.name
+    def visit_assignattr(self, ast: ast_node.AssignAttr):
+        parent = ast.parent
+        if isinstance(parent, ast_node.Assign):
+            self.write("%s" % ast.attrname)
+        elif isinstance(parent, ast_node.AnnAssign):
+            self.write("%s : %s" % (ast.attrname, parent.annotation.as_string()))
 
     def __getattr__(self, item):
         def _missing(*args, **kwargs):
-            # print(item, args, kwargs)
             return None
         return _missing
 
