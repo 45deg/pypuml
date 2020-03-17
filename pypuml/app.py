@@ -51,7 +51,8 @@ class ModuleVisitor(object):
         self.indent += 1
 
         for child in ast.body:
-            child.accept(self)
+            if isinstance(child, ast_node.ClassDef):
+                child.accept(self)
 
         if ast.package:
             for child_mod in self.walk_child_modules():
@@ -87,7 +88,12 @@ class ModuleVisitor(object):
     def visit_functiondef(self, ast: ast_node.FunctionDef):
         args = ast.argnames()
         ret_type = " -> %s" % ast.returns.as_string() if ast.returns else ""
-        self.write("%s(%s)%s" % (ast.name, ','.join(args), ret_type))
+        modifier = ""
+        if ast.is_abstract():
+            modifier += "{abstract} "
+        if ast.type in {"classmethod", "staticmethod"}:
+            modifier += "{static} "
+        self.write("%s%s(%s)%s" % (modifier, ast.name, ','.join(args), ret_type))
 
     def visit_asyncfunctiondef(self, ast: ast_node.AsyncFunctionDef):
         self.visit_functiondef(ast)
@@ -111,6 +117,7 @@ class ModuleVisitor(object):
 
     def __getattr__(self, item):
         def _missing(*args, **kwargs):
+            # print("\u001b[31m", item, args, kwargs, "\u001b[0m")
             return None
         return _missing
 
