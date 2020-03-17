@@ -122,5 +122,6 @@ class ModuleVisitor(object):
         return _missing
 
 def main():
+    sys.path.insert(0, os.getcwd())
     a = ModuleVisitor()
     a.exec(sys.argv[1])
